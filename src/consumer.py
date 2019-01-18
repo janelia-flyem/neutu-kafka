@@ -3,6 +3,61 @@ import sys
 from kafka import KafkaConsumer
 from datetime import datetime
 from pprint import pprint
+import json
+from termcolor import colored
+
+interact_count = 0
+
+def passed(message):
+    cond = True
+    if ARGS.category:
+        #print(value)
+        category = message.get("category", "")
+        if category:
+            cond = cond and (category == ARGS.category)
+        else:
+            cond = False
+
+    if ARGS.user:
+        user = message.get("user", "")
+        if user:
+            cond = cond and (user == ARGS.user)
+        else:
+            cond = False
+
+    if ARGS.description:
+        description = message.get("description", "")
+        #print(ARGS.description.lower(), description.lower())
+        if description:
+            cond = cond and (ARGS.description.lower() in description.lower())
+        else:
+            cond = False
+        #print(cond)
+
+    #cond = cond and ("url" in message)
+
+    return cond
+
+def print_message(message):
+    #print(message)
+    #print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
+    category = message.get("category", "")
+    if category == 'interact':
+        global interact_count
+        interact_count += 1
+        print('#interaction:', interact_count)
+    elif category == 'profile':
+        duration = message.get("duration", 0)
+        if duration > 100:
+            print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
+    elif category == 'INFO':
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", colored(message.get("description", ""), "green"))
+    elif category == 'ERROR':
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", colored(message.get("description", ""), "red"))
+    else:
+        print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
+
+
 
 
 def read_messages():
@@ -17,24 +72,9 @@ def read_messages():
                              group_id=ARGS.group,
                              auto_offset_reset=ARGS.offset)
     for message in consumer:
-        if ARGS.debug:
-            pprint(message)
-        try:
-            print ("[%s] %s:%d:%d: key=%s value=%s" % (datetime.fromtimestamp(message.timestamp/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                                                       message.topic, message.partition,
-                                                       message.offset, message.key,
-                                                       message.value))
-        except UnicodeDecodeError:
-            print("[%s] %s:%d:%d: key=%s CANNOT DECODE MESSAGE" % (datetime.fromtimestamp(message.timestamp/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                                                                   message.topic, message.partition,
-                                                                   message.offset, message.key))
-            pprint(message)
-            sys.exit(-1)
-        except Exception as ex:
-            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-            message = template.format(type(ex).__name__, ex.args)
-            print(message)
-            sys.exit(-1)
+        value = json.loads(message.value.decode('utf-8'))
+        if passed(value):
+            print_message(value)
 
 
 if __name__ == '__main__':
@@ -42,7 +82,10 @@ if __name__ == '__main__':
         description='Kafka consumer')
     PARSER.add_argument('--server', dest='server', default='', help='Server')
     PARSER.add_argument('--topic', dest='topic', default='test', help='Topic')
+    PARSER.add_argument('--category', dest='category', default='', help='Category')
     PARSER.add_argument('--group', dest='group', default='', help='Group')
+    PARSER.add_argument('--user', dest='user', help='User')
+    PARSER.add_argument('--description', dest='description', help='Description')
     PARSER.add_argument('--offset', dest='offset', default='latest',
                         help='offset (earliest or latest)')
     PARSER.add_argument('--debug', dest='debug', action='store_true',
