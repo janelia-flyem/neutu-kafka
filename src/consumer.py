@@ -9,10 +9,12 @@ from termcolor import colored
 
 interact_count = 0
 all_mouse_stat = {}
+all_key_stat = {}
 
 def get_detail(message):
+    user = message.get("user", "*")
     detail = "; ".join([s for s in [message.get("description", ""), message.get("diagnostic"), 
-        format_mouse_message(message, message.get("user", "*"))] if s])
+        format_mouse_message(message, user), format_key_message(message, user)] if s])
 
     return detail
 
@@ -111,6 +113,24 @@ def format_mouse_message(message, user = '*'):
         except:
             pass
 
+def format_key_message(message, user = '*'):
+    obj = message.get("object", {})
+    if obj:
+        try:
+            if obj.get("type", "") == "key":
+                if not user in all_key_stat:
+                    all_key_stat[user] = {}
+                key_stat = all_key_stat[user]
+                s = "key " + obj.get("id", "") + ": " + message.get("action", "")
+                if s in key_stat:
+                    key_stat[s] += 1
+                else:
+                    key_stat[s] = 1
+
+                return s + ' x' + str(key_stat[s])
+        except:
+            pass
+
 def print_message(message):
     # print(message)
     #print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
@@ -167,9 +187,21 @@ def read_messages():
             if passed(value):
                 print_message(value)
         elif range_state == 2:
-            print(all_mouse_stat)
             break
 
+def save_stat(output):
+    with open(output, "w") as fp:
+        stat = {}
+        if all_mouse_stat:
+            stat["mouse"] = all_mouse_stat
+        if all_key_stat:
+            stat["key"] = all_key_stat
+        if stat:
+            print('\nSaving statstics in', output, '...')
+            json.dump(stat, fp, indent=2)
+            print('Done!')
+        else:
+            print("\nNo statistics to be saved.")
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser(
@@ -189,9 +221,21 @@ if __name__ == '__main__':
     PARSER.add_argument('--debug', dest='debug', action='store_true',
                         default=False, help='Flag, Very chatty')
     PARSER.add_argument('--date', dest='date', help='Date')
+    PARSER.add_argument('--output', dest='output', help='Output')
+
     ARGS = PARSER.parse_args()
     try:
         read_messages()
     except:
+        pass
+        
+    if ARGS.output:
+        save_stat(ARGS.output)
+    else:
+        print("\nMouse:")
         print(all_mouse_stat)
+        print("\nKey:")
+        print(all_key_stat)
+
+    # print(json.dumps(all_mouse_stat, sort_keys=True))
     sys.exit(0)
