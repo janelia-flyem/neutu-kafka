@@ -8,13 +8,15 @@ import json
 from termcolor import colored
 
 interact_count = 0
-all_mouse_stat = {}
-all_key_stat = {}
+# all_mouse_stat = {}
+# all_key_stat = {}
+all_object_stat = {}
 
 def get_detail(message):
     user = message.get("user", "*")
     detail = "; ".join([s for s in [message.get("description", ""), message.get("diagnostic"), 
-        format_mouse_message(message, user), format_key_message(message, user)] if s])
+        # format_mouse_message(message, user), format_key_message(message, user),
+        format_object_message(message, user)] if s])
 
     return detail
 
@@ -95,41 +97,25 @@ def passed(message):
 
     return cond
 
-def format_mouse_message(message, user = '*'):
+def update_object_stat(obj, action, user):
+    # print(obj)
+    if not user in all_object_stat:
+        all_object_stat[user] = {}
+    obj_stat = all_object_stat[user]
+    s = obj.get("type", "") + " " + obj.get("name", "")  + ": " + action
+    if s in obj_stat:
+        obj_stat[s] += 1
+    else:
+        obj_stat[s] = 1
+
+    return s + ' x' + str(obj_stat[s])
+
+def format_object_message(message, user = '*'):
     obj = message.get("object", {})
+    # print(obj)
     if obj:
-        try:
-            if obj.get("type", "") == "mouse":
-                if not user in all_mouse_stat:
-                    all_mouse_stat[user] = {}
-                mouse_stat = all_mouse_stat[user]
-                s = "mouse " + obj.get("id", "") + ": " + message.get("action", "")
-                if s in mouse_stat:
-                    mouse_stat[s] += 1
-                else:
-                    mouse_stat[s] = 1
+        return update_object_stat(obj, message.get("action", ""), user)
 
-                return s + ' x' + str(mouse_stat[s])
-        except:
-            pass
-
-def format_key_message(message, user = '*'):
-    obj = message.get("object", {})
-    if obj:
-        try:
-            if obj.get("type", "") == "key":
-                if not user in all_key_stat:
-                    all_key_stat[user] = {}
-                key_stat = all_key_stat[user]
-                s = "key " + obj.get("id", "") + ": " + message.get("action", "")
-                if s in key_stat:
-                    key_stat[s] += 1
-                else:
-                    key_stat[s] = 1
-
-                return s + ' x' + str(key_stat[s])
-        except:
-            pass
 
 def print_message(message):
     # print(message)
@@ -144,7 +130,8 @@ def print_message(message):
         if duration > 100:
             print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
     elif category == 'INFO':
-        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", colored(get_detail(message), "green"))
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", 
+            colored(get_detail(message), "green"))
     elif category == 'ERROR':
         print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", colored(message.get("description", ""), "red"))
     else:
@@ -191,12 +178,7 @@ def read_messages():
 
 def save_stat(output):
     with open(output, "w") as fp:
-        stat = {}
-        if all_mouse_stat:
-            stat["mouse"] = all_mouse_stat
-        if all_key_stat:
-            stat["key"] = all_key_stat
-        if stat:
+        if all_object_stat:
             print('\nSaving statstics in', output, '...')
             json.dump(stat, fp, indent=2)
             print('Done!')
@@ -226,16 +208,17 @@ if __name__ == '__main__':
     ARGS = PARSER.parse_args()
     try:
         read_messages()
+    except Exception as e:
+        print(e)
     except:
         pass
         
     if ARGS.output:
         save_stat(ARGS.output)
     else:
-        print("\nMouse:")
-        print(all_mouse_stat)
-        print("\nKey:")
-        print(all_key_stat)
+        print("\n")
+        print(all_object_stat)
+
 
     # print(json.dumps(all_mouse_stat, sort_keys=True))
     sys.exit(0)
