@@ -1,11 +1,12 @@
 import argparse
 import sys
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, TopicPartition
 from datetime import datetime
 import time
 from pprint import pprint
 import json
 from termcolor import colored
+import traceback
 
 interact_count = 0
 # all_mouse_stat = {}
@@ -15,8 +16,18 @@ all_object_stat = {}
 def get_detail(message):
     user = message.get("user", "*")
     detail = "; ".join([s for s in [message.get("description", ""), message.get("diagnostic"), 
-        # format_mouse_message(message, user), format_key_message(message, user),
         format_object_message(message, user)] if s])
+
+    if not detail:
+        detail = message.get("action", "")
+        if detail:
+            url = message.get("url", "")
+            if url:
+                detail = detail + ":  " + url
+            duration = message.get("duration", 0)
+            if duration:
+                detail = detail + " -- " + str(duration) + "ms"
+
 
     return detail
 
@@ -100,7 +111,7 @@ def passed(message):
 def update_object_stat(obj, action, user):
     # print(obj)
     if not user in all_object_stat:
-        all_object_stat[user] = {}
+        all_object_stat[user] = {'recorded': []}
     obj_stat = all_object_stat[user]
     s = obj.get("type", "") + " " + obj.get("name", "")  + ": " + action
     if s in obj_stat:
@@ -114,28 +125,34 @@ def format_object_message(message, user = '*'):
     obj = message.get("object", {})
     # print(obj)
     if obj:
-        return update_object_stat(obj, message.get("action", ""), user)
+        action = message.get("action", "")
+        msg =  update_object_stat(obj, action, user)
+        msg += " (ID=" + obj.get("id", "") + ")"
+        return msg
+
 
 
 def print_message(message):
     # print(message)
     #print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
     category = message.get("category", "")
-    if category == 'interact':
-        global interact_count
-        interact_count += 1
-        print('#interaction:', interact_count)
-    elif category == 'profile':
+
+    if category == 'PROFILE':
         duration = message.get("duration", 0)
         if duration > 100:
-            print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
-    elif category == 'INFO':
-        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", 
-            colored(get_detail(message), "green"))
+            print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)        
     elif category == 'ERROR':
-        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), message.get("user", "")+" |", colored(message.get("description", ""), "red"))
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), 
+            message.get("user", "")+" |", colored(message.get("description", ""), "red"))
+    elif category == 'WARN':
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), 
+            message.get("user", "")+" |", colored(message.get("description", ""), "yellow"))
     else:
-        print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)
+        detail = get_detail(message)
+        if not detail:
+            print(message)
+        print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'),
+            message.get("user", "")+" |", colored(detail, "green"))
 
 
 def read_messages():
@@ -145,6 +162,7 @@ def read_messages():
         server_list = ['kafka.int.janelia.org:9092', 'kafka2.int.janelia.org:9092', 'kafka3.int.janelia.org:9092']
     if not ARGS.group:
         ARGS.group = None
+
     consumer = KafkaConsumer(ARGS.topic,
                              bootstrap_servers=server_list,
                              group_id=ARGS.group,
@@ -154,6 +172,17 @@ def read_messages():
     if ARGS.date:
         time_range[0] = get_timestamp(ARGS.date)
         time_range[1] = time_range[0] + 86400
+
+    if time_range[0]:
+        toppart = TopicPartition(ARGS.topic, 0)
+        timestamp = time_range[0] * 1000
+        timestamps = {toppart: timestamp}
+        offsethash = consumer.offsets_for_times(timestamps)
+        offsetnum = offsethash[toppart].offset
+        if ARGS.debug:
+            print("Offset for " + str(timestamp) + " is " + str(offsetnum))
+            print("Partition:", toppart)
+        consumer.seek(toppart, int(offsetnum))
 
     # for message in consumer:
     #     value = json.loads(message.value.decode('utf-8'))
@@ -173,10 +202,14 @@ def read_messages():
             value = json.loads(message.value.decode('utf-8'))
             if passed(value):
                 print_message(value)
+                if ARGS.recording:
+                    if 'value' in value:
+                        all_object_stat[value['user']]['recorded'] += [message.timestamp, value['value']]
+
         elif range_state == 2:
             break
 
-def save_stat(output):
+def save_stat(stat, output):
     with open(output, "w") as fp:
         if all_object_stat:
             print('\nSaving statstics in', output, '...')
@@ -197,6 +230,7 @@ if __name__ == '__main__':
     PARSER.add_argument('--detail', dest='detail', help='Detail')
     PARSER.add_argument('--object', dest='obj', help='Object')
     PARSER.add_argument('--action', dest='action', help='Action')
+    PARSER.add_argument('--record', dest='recording', action='store_true', default=False)
     PARSER.add_argument('--window', dest='window', help='Window')
     PARSER.add_argument('--offset', dest='offset', default='latest',
                         help='offset (earliest or latest)')
@@ -209,12 +243,13 @@ if __name__ == '__main__':
     try:
         read_messages()
     except Exception as e:
+        print(traceback.format_exc())
         print(e)
     except:
         pass
         
     if ARGS.output:
-        save_stat(ARGS.output)
+        save_stat(all_object_stat, ARGS.output)
     else:
         print("\n")
         print(all_object_stat)
