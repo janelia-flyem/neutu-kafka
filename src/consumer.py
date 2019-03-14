@@ -7,13 +7,16 @@ from pprint import pprint
 import json
 from termcolor import colored
 import traceback
+import re
 
 interact_count = 0
 # all_mouse_stat = {}
 # all_key_stat = {}
 all_object_stat = {}
+detail_regex = None
 
 def get_detail(message):
+    # print(message)
     user = message.get("user", "*")
     detail = "; ".join([s for s in [message.get("description", ""), message.get("diagnostic"), 
         format_object_message(message, user)] if s])
@@ -89,7 +92,12 @@ def passed(message):
     if ARGS.detail:
         detail = get_detail(message)
         if detail:
-            cond = cond and (ARGS.detail.lower() in detail.lower())
+            if detail_regex:
+                # print(detail_regex)
+                # print('regex:', ARGS.detail[1:])
+                cond = cond and detail_regex.match(detail)
+            else:
+                cond = cond and (ARGS.detail.lower() in detail.lower())
         else:
             cond = False
 
@@ -139,8 +147,11 @@ def print_message(message):
 
     if category == 'PROFILE':
         duration = message.get("duration", 0)
+        detail = get_detail(message)
+        # print(duration)
         if duration > 100:
-            print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message)        
+            print (datetime.fromtimestamp(message['time']).strftime('[%Y-%m-%d %H:%M:%S] '), message.get("user", "")+" |", 
+                colored(str(duration) + 'ms: ' + detail, "blue"))        
     elif category == 'ERROR':
         print (datetime.fromtimestamp(message['time']).strftime('%Y-%m-%d %H:%M:%S'), 
             message.get("user", "")+" |", colored(message.get("description", ""), "red"))
@@ -184,6 +195,12 @@ def read_messages():
             print("Partition:", toppart)
         consumer.seek(toppart, int(offsetnum))
 
+    if ARGS.detail:
+        if ARGS.detail.startswith('/'):
+            global detail_regex
+            detail_regex = re.compile(ARGS.detail[1:])
+            print(detail_regex)
+
     # for message in consumer:
     #     value = json.loads(message.value.decode('utf-8'))
     #     if passed(value):
@@ -222,7 +239,7 @@ if __name__ == '__main__':
     PARSER = argparse.ArgumentParser(
         description='Kafka consumer')
     PARSER.add_argument('--server', dest='server', default='', help='Server')
-    PARSER.add_argument('--topic', dest='topic', default='test', help='Topic')
+    PARSER.add_argument('--topic', dest='topic', default='', help='Topic')
     PARSER.add_argument('--category', dest='category', default='', help='Category')
     PARSER.add_argument('--group', dest='group', default='', help='Group')
     PARSER.add_argument('--user', dest='user', help='User')
@@ -240,6 +257,11 @@ if __name__ == '__main__':
     PARSER.add_argument('--output', dest='output', help='Output')
 
     ARGS = PARSER.parse_args()
+
+    if not ARGS.topic:
+        print('Must specify a topic.')
+        sys.exit(1)
+
     try:
         read_messages()
     except Exception as e:
